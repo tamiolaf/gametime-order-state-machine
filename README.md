@@ -66,4 +66,4 @@ curl -s localhost:3000/orders/$ID | jq
 - **System History Log**: global system history of all events changed in order to triage real-time errors without inspecting each item 
 
 ## AI Use
-I created the API endpoints, order states, and POST/GET requests to move the order from creation to completion. I used Claude Code to find edge cases, draw diagrams, write tests, and possible security errors. All changes were throughly reviewed and adjusted to be more readable and concise.
+I created the API endpoints, order states, and POST/GET requests to move the order from creation to completion. I used Claude Code to find edge cases, draw diagrams, write tests, and possible security errors. This helped save time during development and discover possible omissions. All changes were throughly reviewed and adjusted to be more readable and concise. I manually tested the API endpoints with Postman to ensure orders move as expected. I also adjusted some variable names, removed duplicated code, and confirmed that all tests functioned as intended.
