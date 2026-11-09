@@ -47,12 +47,11 @@ curl -s localhost:3000/orders/$ID | jq
 
 ## Design reasoning
 
-<!-- TODO: fill in -->
-
-- Why action endpoints (`/authorize`, `/complete`) instead of `PUT { state }`
-- Why a result type (`{ ok, error }`) for external calls instead of exceptions
-- Why the transitions are validated *before* the external call
-- Why `needs_attention` instead of retrying forever or calling it cancelled
+- In lieu of a database, I used an in-memory store for the `Orders`. Keeping in on global this allowed it to survive hot reloads. This would be swapped for a real DB in production.
+- I decided to keep the history of an object's states as one of the properties, instead of some global log to track every change made in the system. It's more likely to be interested in a single item's history than the complete system for triaging.
+- I decided to include createdAt and updatedAt on the Order to determine the age of the Order at a quick glance
+- I chose to use action endpoints over `PUT { state }` to better communicate the downstream effects of each API call to the user and potentially enforce validations on each call
+- I decided to validate transtitions before making external calls, because for real world orders you wouldn't want to do something like charge a card before confirming that that particular transaction is allowed.
 
 ## With more time
 
@@ -61,31 +60,10 @@ curl -s localhost:3000/orders/$ID | jq
 - **Persistence**: a real DB, with the state change and an outbox event written in one transaction.
 - **Void retries** with backoff before escalating to `needs_attention`.
 - **Manual resolution**: `POST /orders/:id/resolve` (`needs_attention → cancelled | complete`), plus alerting when an order enters `needs_attention`.
+- **Manual resolution (cont.)**: `GET /orders/state/needs_attention` (`needs_attention → cancelled | complete`), to query all orders needing human intervention at once
 - **A `voiding` intermediate state**, so a crash mid-void leaves a recoverable record instead of a stale `payment_authorized`.
 - **Authorization expiry**: auth holds lapse, so a sweeper could void stale `payment_authorized` orders.
+- **System History Log**: global system history of all events changed in order to triage real-time errors without inspecting each item 
 
-<details><summary>Earlier notes</summary>
-
-/orders
-
-- POST request makes new order ✅
-- GET request retrieves all orders ✅
-
-/orders/:id
-- GET request retrieves current order information ✅
-- PUT request updates current user information
-
-/orders/:id/history
-
-- GET request retrieves history of order information
-
-Should I use:
-/payments/:id
-/orders/:id/payments/:id
-
-- GET request could be a list of transactions? Need to store order history somewhere
-
-
-- how to track order state history with timestamps?
-
-</details>
+## AI Use
+I created the API endpoints, order states, and POST/GET requests to move the order from creation to completion. I used Claude Code to find edge cases, draw diagrams, write tests, and possible security errors. All changes were throughly reviewed and adjusted to be more readable and concise.
