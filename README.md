@@ -1,36 +1,91 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Order State Machine
 
-## Getting Started
+A small checkout backend that models an order's lifecycle with failure recovery that depends on the stage.
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+initialized ──authorize ok──▶ payment_authorized ──complete ok──▶ complete
+     │                               │
+     └─ decline ──▶ declined         └─ complete fails → void payment
+                                          ├─ void ok    ──▶ cancelled
+                                          └─ void fails ──▶ needs_attention
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Running
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm install
+pnpm dev      # http://localhost:3000
+pnpm test     # vitest
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## API
 
-## Learn More
+| Method | Path | Body | Result |
+| --- | --- | --- | --- |
+| POST | `/orders` | `{ "name": string }` | 201 new order |
+| GET | `/orders` | | all orders |
+| GET | `/orders/:id` | | current state + history, or 404 |
+| POST | `/orders/:id/authorize` | `{ "simulate"?: { "authorize": "fail" } }` | `payment_authorized` or `declined`, or 409 |
+| POST | `/orders/:id/complete` | `{ "simulate"?: { "complete": "fail", "void": "fail" } }` | `complete`, `cancelled` or `needs_attention`, or 409 |
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+ID=$(curl -s -XPOST localhost:3000/orders -d '{"name":"Knicks vs Celtics"}' | jq -r .id)
+curl -s -XPOST localhost:3000/orders/$ID/authorize
+curl -s -XPOST localhost:3000/orders/$ID/complete -d '{"simulate":{"complete":"fail","void":"fail"}}'
+curl -s localhost:3000/orders/$ID | jq
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project layout
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `lib/orders/types.ts`: states, `Order`, history entries, domain errors
+- `lib/orders/stateMachine.ts`: transition table and `transition()` (the only way state changes)
+- `lib/orders/service.ts`: orchestrates payment and fulfillment calls and picks the next state
+- `lib/payments/`: `PaymentGateway` / `FulfillmentService` interfaces and scriptable stubs
+- `lib/orders/store.ts`: in-memory store
+- `app/orders/**/route.ts`: thin HTTP layer
+- `lib/http.ts`: errors → status codes (404 / 409 / 400)
 
-## Deploy on Vercel
+## Design reasoning
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+<!-- TODO: fill in -->
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Why action endpoints (`/authorize`, `/complete`) instead of `PUT { state }`
+- Why a result type (`{ ok, error }`) for external calls instead of exceptions
+- Why the transitions are validated *before* the external call
+- Why `needs_attention` instead of retrying forever or calling it cancelled
+
+## With more time
+
+- **Idempotency keys** on `/authorize` and `/complete`, so retried requests can't double-charge.
+- **Concurrency control**: a per-order lock or optimistic `version` field so two concurrent `/complete` calls can't both run.
+- **Persistence**: a real DB, with the state change and an outbox event written in one transaction.
+- **Void retries** with backoff before escalating to `needs_attention`.
+- **Manual resolution**: `POST /orders/:id/resolve` (`needs_attention → cancelled | complete`), plus alerting when an order enters `needs_attention`.
+- **A `voiding` intermediate state**, so a crash mid-void leaves a recoverable record instead of a stale `payment_authorized`.
+- **Authorization expiry**: auth holds lapse, so a sweeper could void stale `payment_authorized` orders.
+
+<details><summary>Earlier notes</summary>
+
+/orders
+
+- POST request makes new order ✅
+- GET request retrieves all orders ✅
+
+/orders/:id
+- GET request retrieves current order information ✅
+- PUT request updates current user information
+
+/orders/:id/history
+
+- GET request retrieves history of order information
+
+Should I use:
+/payments/:id
+/orders/:id/payments/:id
+
+- GET request could be a list of transactions? Need to store order history somewhere
+
+
+- how to track order state history with timestamps?
+
+</details>
